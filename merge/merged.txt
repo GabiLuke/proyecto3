@@ -1,0 +1,358 @@
+// File: c:\Users\gabi_\Desktop\prConBracho\proyecto3 - copia\package.json
+{
+  "name": "proyecto3",
+  "version": "1.0.0",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "seed": "node src/seed.js"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.0",
+    "cloudinary": "^2.8.0",
+    "cors": "^2.8.5",
+    "dotenv": "16.0.3",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.0",
+    "mongoose": "^7.0.3",
+    "multer": "^2.0.2"
+  },
+  "description": "",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
+}
+// File: c:\Users\gabi_\Desktop\prConBracho\proyecto3 - copia\src\app.js
+require("dotenv").config();
+const express = require("express");
+const mongoose = require("mongoose");
+const cors = require("cors");
+
+const userRoutes = require("./routes/UserRoutes");
+const itemRoutes = require("./routes/ItemRoutes");
+
+const app = express();
+
+app.use(express.json());
+app.use(cors());
+
+mongoose
+  .connect(process.env.MONGO_URI)
+  .then(() => console.log("✅ MongoDB conectado"))
+  .catch((err) => console.error("❌ Error conectando a MongoDB:", err));
+
+app.use("/users", userRoutes);
+app.use("/items", itemRoutes);
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 Servidor escuchando en el puerto ${PORT}`);
+});
+
+
+// File: c:\Users\gabi_\Desktop\prConBracho\proyecto3 - copia\src\controllers\ItemController.js
+const Item = require("../models/Item");
+
+exports.createItem = async (req, res) => {
+  try {
+    const item = await Item.create(req.body);
+    res.json(item);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
+exports.getItems = async (req, res) => {
+  try {
+    const items = await Item.find();
+    res.json(items);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.deleteItem = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const item = await Item.findByIdAndDelete(id);
+    if (!item) {
+      return res.status(404).json({ message: "Item no encontrado" });
+    }
+    res.json(item);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.updateItem = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const item = await Item.findByIdAndUpdate(id, req.body, { new: true });
+    if (!item) {
+      return res.status(404).json({ message: "Item no encontrado" });
+    }
+    res.json(item);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
+
+// File: c:\Users\gabi_\Desktop\prConBracho\proyecto3 - copia\src\controllers\UserController.js
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
+const cloudinary = require("cloudinary").v2;
+const User = require("../models/User");
+
+exports.register = async (req, res) => {
+  try {
+    const { username, email, password } = req.body;
+    const hashed = await bcrypt.hash(password, 10);
+    const image = req.file?.path || null;
+
+    const user = await User.create({
+      username,
+      email,
+      password: hashed,
+      image,
+    });
+
+    res.json(user);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+};
+
+exports.login = async (req, res) => {
+  const { email, password } = req.body;
+
+  const user = await User.findOne({ email });
+  if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
+
+  const match = await bcrypt.compare(password, user.password);
+  if (!match)
+    return res.status(401).json({ message: "Credenciales inválidas" });
+
+  const token = jwt.sign(
+    { id: user._id, role: user.role },
+    process.env.JWT_SECRET
+  );
+
+  res.json({ token });
+};
+
+exports.changeRole = async (req, res) => {
+  const { id } = req.params;
+  const { role } = req.body;
+
+  const user = await User.findByIdAndUpdate(id, { role }, { new: true });
+
+  res.json(user);
+};
+
+exports.deleteUser = async (req, res) => {
+  const { id } = req.params;
+
+  const user = await User.findById(id);
+  if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
+
+  if (req.user.role !== "admin" && req.user.id !== id) {
+    return res.status(403).json({ message: "No autorizado" });
+  }
+
+  if (user.image) {
+    const segments = user.image.split("/");
+    const filename = segments.pop();
+    const publicId = `users/${filename.split(".")[0]}`;
+
+    await cloudinary.uploader.destroy(publicId);
+  }
+
+  await user.deleteOne();
+  res.json({ message: "Usuario eliminado" });
+};
+
+exports.addRelated = async (req, res) => {
+  const { id } = req.params;
+  const { itemId } = req.body;
+
+  const user = await User.findById(id);
+
+  if (!user.relatedData.includes(itemId)) {
+    user.relatedData.push(itemId);
+  }
+
+  await user.save();
+  res.json(user);
+};
+
+exports.getUsers = async (req, res) => {
+  const users = await User.find();
+  res.json(users);
+};
+
+
+// File: c:\Users\gabi_\Desktop\prConBracho\proyecto3 - copia\src\middleware\Auth.js
+const jwt = require("jsonwebtoken");
+
+exports.auth = (req, res, next) => {
+  const token = req.headers.authorization?.split(" ")[1];
+  if (!token) return res.status(401).json({ message: "Token requerido" });
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch {
+    res.status(403).json({ message: "Token inválido" });
+  }
+};
+
+exports.isAdmin = (req, res, next) => {
+  if (req.user.role !== "admin")
+    return res.status(403).json({ message: "Solo admin" });
+
+  next();
+};
+
+
+// File: c:\Users\gabi_\Desktop\prConBracho\proyecto3 - copia\src\middleware\Upload.js
+const multer = require("multer");
+const cloudinary = require("cloudinary").v2;
+const { Readable } = require("stream");
+
+cloudinary.config({ cloudinary_url: process.env.CLOUDINARY_URL });
+
+// Usar memoria en lugar de Cloudinary Storage
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
+
+// Middleware personalizado para subir a Cloudinary
+const uploadToCloudinary = (req, res, next) => {
+  if (!req.file) return next();
+
+  const stream = cloudinary.uploader.upload_stream(
+    { folder: "users" },
+    (error, result) => {
+      if (error) {
+        console.error("Error subiendo a Cloudinary:", error);
+        return res.status(500).json({ error: "Error subiendo imagen" });
+      }
+      req.file.path = result.secure_url;
+      next();
+    }
+  );
+
+  // Pipe el buffer al stream
+  Readable.from(req.file.buffer).pipe(stream);
+};
+
+module.exports = { upload, uploadToCloudinary };
+
+
+// File: c:\Users\gabi_\Desktop\prConBracho\proyecto3 - copia\src\models\Item.js
+const mongoose = require("mongoose");
+
+const itemSchema = new mongoose.Schema(
+  {
+    title: { type: String, required: true, trim: true },
+    description: { type: String, trim: true },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+module.exports =
+  mongoose.models.itemSchema || mongoose.model("Item", itemSchema);
+
+
+// File: c:\Users\gabi_\Desktop\prConBracho\proyecto3 - copia\src\models\User.js
+const mongoose = require("mongoose");
+
+const userSchema = new mongoose.Schema(
+  {
+    username: { type: String, required: true, trim: true },
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true,
+    },
+    password: { type: String, required: true },
+    role: { type: String, enum: ["admin", "user"], default: "user" },
+    image: { type: String, default: null },
+    relatedData: [{ type: mongoose.Schema.Types.ObjectId, ref: "Item" }],
+  },
+  {
+    timestamps: true,
+  }
+);
+
+module.exports =
+  mongoose.models.userSchema || mongoose.model("User", userSchema);
+
+
+// File: c:\Users\gabi_\Desktop\prConBracho\proyecto3 - copia\src\routes\ItemRoutes.js
+const express = require("express");
+const router = express.Router();
+const {
+  createItem,
+  getItems,
+  deleteItem,
+  updateItem,
+} = require("../controllers/ItemController");
+
+router.post("/", createItem);
+router.get("/", getItems);
+router.delete("/:id", deleteItem);
+router.put("/:id", updateItem);
+
+module.exports = router;
+
+
+// File: c:\Users\gabi_\Desktop\prConBracho\proyecto3 - copia\src\routes\UserRoutes.js
+const express = require("express");
+const router = express.Router();
+const { upload, uploadToCloudinary } = require("../middleware/Upload");
+const { auth, isAdmin } = require("../middleware/Auth");
+const {
+  register,
+  login,
+  changeRole,
+  deleteUser,
+  addRelated,
+  getUsers,
+} = require("../controllers/UserController");
+
+// Nota: uploadToCloudinary procesa la imagen después de multer
+router.post("/register", upload.single("image"), uploadToCloudinary, register);
+router.post("/login", login);
+router.patch("/:id/role", auth, isAdmin, changeRole);
+router.delete("/:id", auth, deleteUser);
+router.patch("/:id/add-related", auth, addRelated);
+router.get("/", getUsers);
+
+module.exports = router;
+
+
+// File: c:\Users\gabi_\Desktop\prConBracho\proyecto3 - copia\src\seed.js
+require("dotenv").config();
+const mongoose = require("mongoose");
+const Item = require("./models/Item");
+
+mongoose
+  .connect(process.env.MONGO_URI)
+  .then(async () => {
+    await Item.insertMany([
+      { title: "Item 1", description: "Descripción 1" },
+      { title: "Item 2", description: "Descripción 2" },
+    ]);
+    console.log("✅ Semilla completada");
+    process.exit();
+  })
+  .catch((err) => console.error(err));
+
+
