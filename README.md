@@ -21,13 +21,13 @@ cd proyecto3
 3. Variables de Entorno
 Crea un archivo llamado .env en la raíz del proyecto y añade las siguientes variables con tus credenciales:
 # Configuración para MongoDB Atlas
-MONGO_URI=mongodb+srv://gabiluke99_db_user:eCuHus6KnQOWXyqw@cluster0.mtko43p.mongodb.net/?
+MONGO_URI=
 
 # Configuración de Cloudinary (¡Ojo con no pisar credenciales!)
-CLOUDINARY_URL=cloudinary://866724858699745:cQ8iFCxuepmfngj6qdscLtaGqiw@dlou1td9
+CLOUDINARY_URL=
 
 # Clave para firmar los tokens JWT
-JWT_SECRET=9e6d7a4b8f3c1e0d2a7f5c8b4e1d6a0f3c1e0d2a7f5c8b4e1d6a0f3c1e0d2a7f
+JWT_SECRET=
 
 # Puerto de escucha del servidor
 PORT=3000
